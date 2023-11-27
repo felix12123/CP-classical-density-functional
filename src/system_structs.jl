@@ -19,5 +19,5 @@ mutable struct RodLat
 end
 
 function make_RodLat(L::Int, M::Int, η0::Float64, v_ext::Vector{Float64})
-  RodLat(η0*L .* v_ext, L, M, η0, v_ext)
+  RodLat(η0/L .* v_ext, L, M, η0, v_ext)
 end
