@@ -91,62 +91,46 @@ end
 
 function test_z()
 
-  # Lege Parameter und externes Potential fest
-  η1 = 0.1
-  η2 = 0.2
-  η3 = 0.3
-  η4 = 0.4
-  η5 = 0.5
-  η6 = 0.6
-  η7 = 0.7
-  η8 = 0.8
-  η9 = 0.9
-  #η = 0.1:0.1:0.9
-  L  = 10
-  M  = 500 + L
-  α  = 0.001
-  ϵ  = 1e-10
-  ϵ8 = 1e-9     # FIXME: Wieso ist das nicht ~10e-10?
-  ϵ9 = 1e-5     # FIXME: Wieso ist das nicht ~10e-10?
+  # Parameter des Systems:
+  L     = 10
+  M     = 500 + L
+  ηs    = collect(0.1:0.1:0.9)
   v_ext = vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L))
+  
+  # Parameter für Genauigkeit bzw. für Plots
+  range = L:10*L
+  α     = 0.001
+  ϵ     = 1e-10
+  ϵ8    = 1e-9     # FIXME: Wieso ist das nicht ~10e-10?
+  ϵ9    = 1e-5     # FIXME: Wieso ist das nicht ~10e-10?
 
-  # Generiere Systeme
-  sys1 = make_RodLat(L, M, η1, v_ext)
-  sys2 = make_RodLat(L, M, η2, v_ext)
-  sys3 = make_RodLat(L, M, η3, v_ext)
-  sys4 = make_RodLat(L, M, η4, v_ext)
-  sys5 = make_RodLat(L, M, η5, v_ext)
-  sys6 = make_RodLat(L, M, η6, v_ext)
-  sys7 = make_RodLat(L, M, η7, v_ext)
-  sys8 = make_RodLat(L, M, η8, v_ext)
-  sys9 = make_RodLat(L, M, η9, v_ext)
+  # Generiere initiale Systeme
+  systems = []
+  for i in 1:9
+    push!(systems, make_RodLat(L, M, ηs[i], v_ext))
+  end
 
-  println("Stats for Sys1")
-  sys1 = ρ_steps(sys1, α, ϵ)
-  println("\n Stats for Sys2")
-  sys2 = ρ_steps(sys2, α, ϵ)
-  println("\n Stats for Sys3")
-  sys3 = ρ_steps(sys3, α, ϵ)
-  println("\n Stats for Sys4")
-  sys4 = ρ_steps(sys4, α, ϵ)
-  println("\n Stats for Sys5")
-  sys5 = ρ_steps(sys5, α, ϵ)
-  println("\n Stats for Sys6")
-  sys6 = ρ_steps(sys6, α, ϵ)
-  println("\n Stats for Sys7")
-  sys7 = ρ_steps(sys7, α, ϵ)
-  println("\n Stats for Sys8")
-  sys8 = ρ_steps(sys8, α, ϵ8)
-  println("\n Stats for Sys9")
-  sys9 = ρ_steps(sys9, α, ϵ9)
-  println("\n")
+  # Berechne Systeme
+  for i in 1:9
+    println("Stats for Sys", i)
+    if i < 8
+      systems[i] = ρ_steps(systems[i], α, ϵ)
+    elseif i == 8
+      systems[i] = ρ_steps(systems[i], α, ϵ8)
+    elseif i == 9
+      systems[i] = ρ_steps(systems[i], α, ϵ9)
+    end
+    println("\n")
+  end
 
-  #plot((eachindex(sys1.ρ) |> collect)[3:30], [sys1.ρ[3:30], sys2.ρ[3:30], sys3.ρ[3:30], sys4.ρ[3:30], sys5.ρ[3:30], sys6.ρ[3:30], sys7.ρ[3:30], sys8.ρ[3:30], sys9.ρ[3:30]], label=[L"\eta_0 = 0.1" L"\eta_0 = 0.2" L"\eta_0 = 0.3" L"\eta_0 = 0.4" L"\eta_0 = 0.5" L"\eta_0 = 0.6" L"\eta_0 = 0.7" L"\eta_0 = 0.8" L"\eta_0 = 0.9"], xlabel = "s", ylabel = L"\rho", title = "L = 3", legend = :outerright, dpi = 300)
-  #savefig("L=3_Dichteprofil.png")
-  plot((eachindex(sys1.ρ) |> collect)[10:100], [sys1.ρ[10:100], sys2.ρ[10:100], sys3.ρ[10:100], sys4.ρ[10:100], sys5.ρ[10:100], sys6.ρ[10:100], sys7.ρ[10:100], sys8.ρ[10:100], sys9.ρ[10:100]], label=[L"\eta_0 = 0.1" L"\eta_0 = 0.2" L"\eta_0 = 0.3" L"\eta_0 = 0.4" L"\eta_0 = 0.5" L"\eta_0 = 0.6" L"\eta_0 = 0.7" L"\eta_0 = 0.8" L"\eta_0 = 0.9"], xlabel = "s", ylabel = L"\rho", title = "L = 10", legend = :outerright, dpi = 300)
-  savefig("L=10_Dichteprofil.png")
+  # Fertige Plots an
+  plot((eachindex(systems[1].ρ) |> collect)[range], [systems[1].ρ[range], systems[2].ρ[range], systems[3].ρ[range], systems[4].ρ[range], systems[5].ρ[range], systems[6].ρ[range], systems[7].ρ[range], systems[8].ρ[range], systems[9].ρ[range]], label = permutedims(L"\eta_0 = " .* string.(0.1:0.1:0.9)), xlabel = "s", ylabel = L"\rho", title = "L = " * string(L), legend = :outerright, dpi = 300)
+  if L == 3
+    savefig("L=3_Dichteprofil.png")
+  elseif L == 10
+    savefig("L=10_Dichteprofil.png")
+  end
+
 end
 
 test_z()
-
-#test()
