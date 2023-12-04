@@ -87,7 +87,7 @@ function test_each_function()
 end
 
 
-function test_z(L=3, M=1000+L, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L)))
+function test_z(L=3, M=400, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L)))
 
 	# Parameter des Systems:
 	# L     = 3
@@ -96,9 +96,9 @@ function test_z(L=3, M=1000+L, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), on
 	# v_ext = vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L))
 	
 	# Parameter für Genauigkeit bzw. für Plots
-	plot_range = L:10*L
-	α_minmax   = (1e-4, 1e-2)
-	ϵ          = 1e-10
+	plot_range = L:(10*L)
+	α_minmax   = (0.01, 0.1)
+	ϵ          = 5e-12
 
 	# Generiere initiale Systeme
 	systems = []
@@ -106,51 +106,60 @@ function test_z(L=3, M=1000+L, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), on
 		push!(systems, make_RodLat(L, M, ηs[i], v_ext))
 	end
 
+	comp_times = zeros(Float64, size(ηs))
 	# Berechne Systeme
 	for i in eachindex(systems)
+		starttime = time()
 		println("Stats for Sys", i)
-		if i < 8
-			systems[i] = ρ_steps(systems[i], α_minmax, ϵ)
-		elseif i == 8
-			systems[i] = ρ_steps(systems[i], α_minmax, ϵ)
-		elseif i == 9
-			systems[i] = ρ_steps(systems[i], α_minmax, ϵ)
-		end
+		# systems[i] = solve_RodLat(systems[i], α_minmax .* (1 - ηs[i]), ϵ)
+		systems[i] =      ρ_steps(systems[i], α_minmax .* (1 - ηs[i]), ϵ)
 		println("\n")
+		comp_times[i] = time() - starttime
 	end
-
+	display(scatter(ηs, comp_times, xlabel="η0", ylabel="computation time"))
+	
+	
 	# Compute surface tension and save it
 	γs = γ.(systems)
+	γs_ana = γ_analytical.(ηs ./ L, L)
 	γ_df = DataFrame(density=ηs, surface_tension=γs)
 	CSV.write("results/surface_tension_L_$(L).csv", γ_df)
 
 	# plot surface tension
-	γ_plot = scatter(ηs, γs, xlabel=L"\eta_0", ylabel=L"\gamma_0", label="", title="Surface tension for different densities (L = $(L))", dpi=300)
+	γ_plot = scatter(ηs, γs, xlabel=L"\eta_0", ylabel=L"\gamma_0", label="numerical", title="Surface tension for different densities (L = $(L))", dpi=300)
+	plot!(γ_plot, ηs, γs_ana, label="analytical")
 	savefig(γ_plot, "results/surface_tension_L_$(L).png")
 
 
 	# Compute gibbs_adsorption and save it
 	
 	Γs = Γ.(systems)
+	Γs_ana = Γ_analytical.(ηs ./ L, L)
 	Γ_df = DataFrame(density=ηs, gibbs_adsorption=Γs)
 	CSV.write("results/gibbs_adsorption_L_$(L).csv", Γ_df)
 
 	# plot gibbs adsorption
-	Γ_plot = scatter(ηs, Γs, xlabel=L"\eta_0", ylabel=L"\Gamma", label="", title="gibbs adsorption for different densities (L = $(L))", dpi=300)
+	Γ_plot = scatter(ηs, Γs, xlabel=L"\eta_0", ylabel=L"\Gamma", label="numerical", title="gibbs adsorption for different densities (L = $(L))", dpi=300)
+	plot!(Γ_plot, ηs, Γs_ana, label="analytical")
 	savefig(Γ_plot, "results/gibbs_adsorption_L_$(L).png")
 
 
 	# Fertige Plots an
 	colors = palette([:blue, :red, :orange], size(systems, 1)) |> collect |> permutedims
+	if size(ηs, 1) <= 3
+		colors = repeat([:auto], size(ηs, 1))
+	end
 	plot((eachindex(systems[1].ρ) |> collect)[plot_range], (x -> x.ρ[plot_range]).(systems), label = permutedims(L"\eta_0 = " .* string.(0.1:0.1:0.9)), xlabel = "s", ylabel = L"\rho", title = "L = " * string(L), legend = :topright, dpi = 300, foreground_color_legend = nothing, linecolor=colors)
-	# if L == 3
-	#   savefig("results/L=3_Dichteprofil.png")
-	# elseif L == 10
-	#   savefig("results/L=10_Dichteprofil.png")
-	# end
 	savefig("results/L_$(L)_Dichteprofil.png")
 
 end
 
-test_z(3)
+# test_z(3)
 test_z(10)
+
+
+
+# TODO-List
+# - Gamma analytisch mit plotten ✓
+# - Gibbs analytisch mit plotten ✓
+# - integrieren von gamma um surface tension zu bestimmen. ⨯
