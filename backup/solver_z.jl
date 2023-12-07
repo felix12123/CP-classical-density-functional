@@ -12,7 +12,33 @@ function n(start::Integer, stop::Integer, ρs::Vector{Float64})::Float64
 end
 
 
+Φ_OD_deriv(x) = -log(1-x)
 
+function μ1(n1::Vector{Float64}, L::Int)::Vector{Float64}
+	return [sum(Φ_OD_deriv.(n1[s:min(end, s+L-1)])) for s in eachindex(n1)]
+end
+function μ1(sys::RodLat)::Vector{Float64} # can probably be deleted
+	n1 = n_1(sys)
+	L = sys.L
+	[sum(Φ_OD_deriv.(n1[s:min(end, s+L-1)])) for s in eachindex(n1)]
+end
+
+
+function μ2(n0::Vector{Float64}, L::Int)::Vector{Float64}
+	[sum(Φ_OD_deriv.(n0[min(end, s+1):min(end, s+L-1)])) for s in eachindex(n0)]
+end
+function μ2(sys::RodLat)::Vector{Float64} # can probably be deleted
+	n0 = n_0(sys)
+	L = sys.L
+	[sum(Φ_OD_deriv.(n0[min(end, s+1):max(end, s+L-1)])) for s in eachindex(n0)]
+end
+
+function μ_ex(sys::RodLat)
+	n0 = n_0(sys)
+	n1 = n_1(sys, n0)
+
+	return μ1(n1, sys.L) - μ2(n0, sys.L)
+end
 
 # Berechne µ_ex
 function μ_ex(s::Integer, L::Integer, ρs::Vector{Float64})::Float64
@@ -76,37 +102,11 @@ function ρ_step(sys::RodLat, α::Float64)
 
 end
 
-function n_0(sys::RodLat)::Vector{Float64}
-	L, ρ = sys.L, sys.ρ
-	N = size(ρ, 1)
-
-	[sum(ρ[max(1, s-L+1):min(N, s-1)]) for s in eachindex(ρ)]
-end
-
-# you can input n_0 if it was already calculated, to save a little bit of time.
-function n_1(sys::RodLat, n_0::Vector{Float64}=[NaN])::Vector{Float64}
-	n1 = zeros(Float64, size(sys.ρ))
-	if isequal(n_0, [NaN])
-		n1 = [sum(sys.ρ[max(1, s-sys.L+1):s]) for s in eachindex(sys.ρ)]
-	else
-		n1 = n_0 .+ sys.ρ
-	end
-
-	if maximum(n1) > 1
-		display(plot([n1, sys.ρ]))
-		error("n_1 has elements larger than 1: $(maximum(n1))")
-	elseif minimum(n1) < 0
-		error("n_1 has elements smaller than 0: $(minimum(n1))")
-	end
-	return n1
-end
-
-function Φ_OD(x::Float64)::Float64
-	x + (1 - x)*log(1 - x)
-end
 
 function μ_ρ0(sys::RodLat)::Float64
-	log(sys.ρ0) + μ_ex(div(size(sys.ρ, 1), 2), sys.L, sys.ρ)
+	# log(sys.ρ0) + μ_ex(div(size(sys.ρ, 1), 2), sys.L, sys.ρ)
+	L, ρ0 = sys.L, sys.ρ0
+	L * log(1 + (ρ0/ (1 - L * ρ0))) - log(1 + ρ0 - L * ρ0) + log(ρ0)
 end
 function μ_ρ0_analytical(ρ0::Float64, L::Int=3)::Float64
 	L * log(1 + (ρ0/ (1 - L * ρ0))) - log(1 + ρ0 - L * ρ0) + log(ρ0)
@@ -135,8 +135,6 @@ function Γ_analytical(ρ0::Float64, L::Int, Δρ::Float64=1e-3)
 	-(γ_analytical(ρ0 + Δρ, L) - γ_analytical(ρ0 - Δρ, L)) / (μ_ρ0_analytical(ρ0 + Δρ, L) - μ_ρ0_analytical(ρ0 - Δρ, L))
 end
 
-function γ_from_int(ρ0, L)
-end
 
 function Γ(sys::RodLat)
 	0.5 * sum((sys.ρ .- sys.ρ0)[sys.L+1:end-sys.L])
@@ -168,30 +166,32 @@ function solve_RodLat(sys::RodLat, α_min_max::NTuple{2, Float64}, ϵ_crit::Floa
 		# Variables α:
 		if ϵ_new < ϵ_old
 			α = min(α_min_max[2], 1.1 * α)
+			# println("α got bigger")
 		else
 			α = max(α_min_max[1], α/5)
+			# println("α got smaller")
 		end
 		ϵ_old = ϵ_new
 		
 		# Update System
-		if ϵ_new < ϵ_crit || counter > 300_000
+		if ϵ_new < ϵ_crit || counter > 75_000
 			println("Konvergenz-Summe = ", ϵ_new)
 			println("Iterationen bis zur Konvergenz: ", counter)
 			break
 		end
 	end
-
+	
 	# Gebe System aus
 	return sys
 end
 
 
 function ρ_steps(sys::RodLat, α_min_max::NTuple{2, Float64}, ϵ_crit::Float64)
-
+	
 	convergent = false
 	convergence_array = ones(Float64, size(sys.ρ, 1))
 	counter = 1
-
+	
 	while !convergent
 		counter += 1
 		# Ziehe wichtige Daten
@@ -203,26 +203,28 @@ function ρ_steps(sys::RodLat, α_min_max::NTuple{2, Float64}, ϵ_crit::Float64)
 		ρs_i1  = deepcopy(ρs)
 		ϵ_old  = Inf
 		α      = α_min_max[1]
-
+		
 		# Berechne für jeden index s in ρs den neuen Wert 
 		for s in 1:len_ρs
 			ρs_new_i = prefactor(L, ρ0) * exp(-1 * μ_ex(s, L, ρs)) * v_ext[s]
 			ρs_i1[s] = (1 - α) * ρs[s] + α * ρs_new_i
-			convergence_array[s] = (ρs_i1[s] - ρs[s])^2
+			convergence_array[s] = (ρs_new_i - ρs[s])^2
 		end
-
+		ϵ_new = sum(convergence_array)
+		
 		# Variables α:
-		if sum(convergence_array) < ϵ_old
+		if ϵ_new < ϵ_old
 			α = min(α_min_max[2], 1.1 * α)
 		else
 			α = max(α_min_max[1], α/5)
+			println("α got smaller")
 		end
-		ϵ_old = sum(convergence_array)
+		ϵ_old = ϵ_new
 		
 		# Update System
-		if sum(convergence_array) < ϵ_crit || counter > 300_000
+		if ϵ_new < ϵ_crit || counter > 75_000
 			convergent = true
-			println("Konvergenz-Summe = ", sum(convergence_array))
+			println("Konvergenz-Summe = ", ϵ_new)
 			println("Iterationen bis zur Konvergenz: ", counter)
 			# println("γ = ", γ(sys))
 		end

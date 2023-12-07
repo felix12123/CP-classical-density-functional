@@ -10,7 +10,7 @@ function installed()
 	return installs
 end
 # Check if packages are installed, else install them
-Packages = ["Plots", "Test", "LaTeXStrings", "CSV", "DataFrames"]
+Packages = ["Plots", "LaTeXStrings", "CSV", "DataFrames", "Statistics", "Measurements", "LsqFit", "Latexify"]
 installed_Packages = keys(installed())
 for Package in Packages
 	if !(Package in installed_Packages)
@@ -27,103 +27,57 @@ for Package in Packages
 end
 
 include("src/system_structs.jl")
+include("src/solver/basic_functions.jl")
 include("src/solver/solver.jl")
-include("src/solver/solver_z.jl")
-include("src/utils.jl")
-include("test/test_solver.jl")
-
-function test()
-	η0 = 0.2
-	L = 3
-	M = 30 + L
-	v_ext = vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L))
-	sys1 = make_RodLat(L, M, η0, v_ext)
-	println("starting system:")
-	println(sys1)
-	
-	
-	α = 0.05
-	steps = 2
-	
-	# sys4 = step_ρ(sys1, α)
-	# for i in 1:steps-1
-	#   sys4 = step_ρ(sys4, α)
-	# end
-
-	sys4, steps = solve_RodLat(sys1, 1e-9, 1e-1)
-	
-	# sys2 = sys1
-	# sys3 = sys1
-	# sys4 = sys1
-	
-	plot(eachindex(sys1.ρ[1:L*10]) |> collect, [sys1.ρ[1:L*10], sys4.ρ[1:L*10]], label=["initial state" "$steps steps"], legend=:bottom)
-	vline!([L], label="Wall")
-end
+include("src/solver/analyze_system.jl")
 
 
-function test_each_function()
-	L  = 3
-	M  = 50
-	η0 = 0.9
-
-	v_ext = vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L))
-	sys1 = make_RodLat(L, M, η0, v_ext)
-
-	plt = plot(eachindex(sys1.ρ), log10.(sys1.ρ), label="ρ_start")
-	n0 = n_0(sys1)
-	n1 = n_1(sys1, n0)
-	plot!(plt, eachindex(n0), [log10.(n0), log10.(n1)], label=["n0" "n1"])
-	# plot!(plt, eachindex(n0), log10.(μ1(n1, sys1.L)), label="μ1")
-	# plot!(plt, eachindex(n0), log10.(μ2(n0, sys1.L)), label="μ2")
-	plot!(plt, eachindex(n0), log10.(exp.(-1 .* μ1(n1, sys1.L) .- μ2(n0, sys1.L))), label="exp(-μ1-μ2)")
-	ρ_new = sys1.ρ0*μ_ex_ρ0(sys1) .* exp.(-1 .* μ1(n1, sys1.L) .- μ2(n0, sys1.L)) .* sys1.v_ext
-	plot!(plt, eachindex(n0), log10.(ρ_new), label="ρ_new")
-	plot!(plt, eachindex(n0), log10.(ones(size(n0)) .* μ_ex_ρ0(sys1)), label="μ_ex_ρ0")
-	display(plt)
-	# picard iteration
-	# ρ_new = (1-α) .* sys1.ρ .+ α .* ρ_new
-
-
-end
-
-
-function test_z(L=3, M=400, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L)))
-
-	# Parameter des Systems:
-	# L     = 3
-	# M     = 1000 + L
-	# ηs    = 0.1:0.1:0.9
-	# v_ext = vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L))
-	
+function start_evaluation(L=3, M=250*L, ηs=0.1:0.1:0.9 |> collect, v_ext=vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L)))
 	# Parameter für Genauigkeit bzw. für Plots
-	plot_range = L:(10*L)
-	α_minmax   = (0.01, 0.1)
-	ϵ          = 5e-12
+	α_minmax   = (0.01, 0.5)
+	ϵ          = 1e-12
+	println("ϵ = $ϵ")
+	println("α_minmax = $α_minmax")
+	println("M = $M")
+
 
 	# Generiere initiale Systeme
-	systems = []
+	systems = Vector{RodLat}(undef, size(ηs))
 	for i in eachindex(ηs)
-		push!(systems, make_RodLat(L, M, ηs[i], v_ext))
+		systems[i] = make_RodLat(L, M, ηs[i], v_ext)
 	end
 
+	# we want to compare the computation time for each density
 	comp_times = zeros(Float64, size(ηs))
+
 	# Berechne Systeme
 	for i in eachindex(systems)
 		starttime = time()
-		println("Stats for Sys", i)
-		# systems[i] = solve_RodLat(systems[i], α_minmax .* (1 - ηs[i]), ϵ)
-		systems[i] =      ρ_steps(systems[i], α_minmax .* (1 - ηs[i]), ϵ)
-		println("\n")
+		println("Stats for Sys", i, " η0 = $(ηs[i])")
+		systems[i] = solve_RodLat(systems[i], α_minmax .* (1 - ηs[i]), ϵ, 300_000)
 		comp_times[i] = time() - starttime
+		println()
 	end
-	display(scatter(ηs, comp_times, xlabel="η0", ylabel="computation time"))
+
+	# save figure of the computation time
+	savefig(scatter(ηs, comp_times, xlabel="η0", ylabel="computation time (s)"), "results/computation_timesL_$L")
 	
-	
+	# create further visualisations
+	analyze_results(systems, ηs)
+end
+
+function analyze_results(systems::Vector{RodLat}, ηs::Vector{Float64})
+	# choose region to plot
+	L = systems[1].L
+	plot_range = L:(10*L)
+
+
 	# Compute surface tension and save it
 	γs = γ.(systems)
 	γs_ana = γ_analytical.(ηs ./ L, L)
 	γ_df = DataFrame(density=ηs, surface_tension=γs)
 	CSV.write("results/surface_tension_L_$(L).csv", γ_df)
+	println("Error of numerical results of surface tension: ", mean(abs.((γs .- γs_ana) ./ γs_ana)))
 
 	# plot surface tension
 	γ_plot = scatter(ηs, γs, xlabel=L"\eta_0", ylabel=L"\gamma_0", label="numerical", title="Surface tension for different densities (L = $(L))", dpi=300)
@@ -132,11 +86,11 @@ function test_z(L=3, M=400, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), ones(
 
 
 	# Compute gibbs_adsorption and save it
-	
 	Γs = Γ.(systems)
 	Γs_ana = Γ_analytical.(ηs ./ L, L)
 	Γ_df = DataFrame(density=ηs, gibbs_adsorption=Γs)
 	CSV.write("results/gibbs_adsorption_L_$(L).csv", Γ_df)
+	println("Error of numerical results of gibbs adsorption: ", mean(abs.((Γs .- Γs_ana) ./ Γs_ana)))
 
 	# plot gibbs adsorption
 	Γ_plot = scatter(ηs, Γs, xlabel=L"\eta_0", ylabel=L"\Gamma", label="numerical", title="gibbs adsorption for different densities (L = $(L))", dpi=300)
@@ -149,17 +103,56 @@ function test_z(L=3, M=400, ηs=0.1:0.1:0.9, v_ext=vcat(zeros(Float64, L), ones(
 	if size(ηs, 1) <= 3
 		colors = repeat([:auto], size(ηs, 1))
 	end
-	plot((eachindex(systems[1].ρ) |> collect)[plot_range], (x -> x.ρ[plot_range]).(systems), label = permutedims(L"\eta_0 = " .* string.(0.1:0.1:0.9)), xlabel = "s", ylabel = L"\rho", title = "L = " * string(L), legend = :topright, dpi = 300, foreground_color_legend = nothing, linecolor=colors)
+	plot((eachindex(systems[1].ρ) |> collect)[plot_range], (x -> x.ρ[plot_range]).(systems), label = permutedims(L"\eta_0 = " .* string.(ηs)), xlabel = "s", ylabel = L"\rho", title = "L = " * string(L), legend = :topright, dpi = 300, size=(600, 400) .* 1.1, foreground_color_legend = nothing, linecolor=colors)
 	savefig("results/L_$(L)_Dichteprofil.png")
-
 end
 
-# test_z(3)
-test_z(10)
+
+function examine_comp_time(L=3, M=250*L, ηs=0.4:0.01:0.95 |> collect, N=25)
+	v_ext=vcat(zeros(Float64, L), ones(Float64, M-L-1), zeros(Float64, L))
+	# Parameter für Genauigkeit bzw. für Plots
+	α_minmax   = (0.01, 0.5)
+	ϵ          = 1e-5
+	println("ϵ = $ϵ")
+	println("α_minmax = $α_minmax")
+	println("M = $M")
 
 
+	# Generiere initiale Systeme
+	systems = Vector{RodLat}(undef, size(ηs))
+	for i in eachindex(ηs)
+		systems[i] = make_RodLat(L, M, ηs[i], v_ext)
+	end
 
-# TODO-List
-# - Gamma analytisch mit plotten ✓
-# - Gibbs analytisch mit plotten ✓
-# - integrieren von gamma um surface tension zu bestimmen. ⨯
+	# we want to compare the computation time for each density
+	comp_times = zeros(Float64, size(ηs))
+
+	# Berechne Systeme
+	for i in 1:N
+		for i in eachindex(systems)
+			starttime = time()
+			solve_RodLat(systems[i], α_minmax .* (1 - ηs[i]), ϵ, 300_000, print_res=false)
+			comp_times[i] += (time() - starttime) / N
+		end
+	end
+	model(x, p) = p[1] ./ (p[2].- x) .^ p[3] .+ p[4]
+	p0 = [5.0, 1.0, 3.0, 0.0]
+	lower = [-Inf, -Inf, 1.0, -Inf]
+	# weights = comp_times ./ sum(comp_times)
+	fit = LsqFit.curve_fit(model, ηs, comp_times, p0, lower=lower)
+	params = fit.param .± stderror(fit)
+	fitdata = model(ηs, Measurements.value.(params))
+	# save figure of the computation time
+	plt1 = scatter(ηs, comp_times, label="Results", xlabel="η0", ylabel="computation time (s)", dpi=300, legend=:outerbottom)
+	p1 = Measurements.value.(params)
+	p1 = params
+	p1 = round.(p1, digits=5)
+	plot!(ηs, fitdata, label="Fit = $(p1[1])/(($(p1[2]) - x) ^$(p1[3])) + $(p1[4])")
+	savefig(plt1, "results/computation_timesL_$L")
+	println("Computation time scales to 1/x^$(params[3])")
+end
+
+# start_evaluation(3)
+# start_evaluation(10)
+
+examine_comp_time()
